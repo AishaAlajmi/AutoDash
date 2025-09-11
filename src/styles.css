@@ -1,0 +1,99 @@
+/* Dark / Light Mode Styles */
+.app {
+  background-color: #1d1f25;
+  color: white;
+  transition: background-color 0.3s ease;
+}
+
+.app.light {
+  background-color: #fff;
+  color: black;
+}
+
+.app button {
+  padding: 10px 20px;
+  border: none;
+  cursor: pointer;
+  border-radius: 8px;
+  margin: 10px;
+}
+
+.app.dark button {
+  background-color: #333;
+  color: white;
+}
+
+.app.light button {
+  background-color: #f4f4f4;
+  color: black;
+}
+
+.panel {
+  background: #333;
+  padding: 15px;
+  margin: 10px;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s ease-in-out;
+}
+
+.panel:hover {
+  transform: scale(1.05);
+}
+
+textarea {
+  background-color: #222;
+  color: white;
+  width: 100%;
+  border-radius: 8px;
+  border: none;
+  padding: 10px;
+}
+
+.toolbar {
+  margin: 20px 0;
+}
+
+.primary {
+  background-color: #5c67f2;
+  color: white;
+  transition: all 0.3s ease;
+}
+
+.primary:hover {
+  background-color: #4a54e1;
+}
+
+.secondary {
+  background-color: #e8e8e8;
+  color: #333;
+}
+
+.secondary:hover {
+  background-color: #ccc;
+}
+
+/* Animations */
+.panel {
+  transition: transform 0.5s, opacity 0.5s;
+}
+
+.panel-enter {
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+.panel-enter-active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.panel-exit {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.panel-exit-active {
+  opacity: 0;
+  transform: scale(0.8);
+}
