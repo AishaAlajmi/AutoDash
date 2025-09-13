@@ -4,11 +4,12 @@
 import { buildLocalFallback } from "../pages/dataAnalysis";
 
 /**
- * Analyze a dataset using Gemini (or local fallback if no API key).
+ * Analyze a dataset using Gemini by proxying the request through a serverless function.
  * Returns the parsed JSON object:
  * { analysisText, keyMetrics: [...], charts: [...] }
  */
-export async function analyzeDatasetWithAI({ headers, fileData, apiKey }) {
+export async function analyzeDatasetWithAI({ headers, fileData }) {
+    // We no longer need the apiKey parameter here as it will be handled by the serverless function.
     const dataSample = JSON.stringify(fileData.slice(0, 5));
 
     const prompt = `You are a data analyst. Analyze the provided dataset with the following headers: ${headers.join(
@@ -71,15 +72,8 @@ ${dataSample}
         },
     };
 
-    const key = import.meta.env.VITE_GOOGLE_API_KEY;
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${key}`;
-
-    // If no key is configured, fall back to local heuristic dashboard
-    if (!key) {
-        return buildLocalFallback(headers, fileData);
-    }
-
-    const response = await fetch(apiUrl, {
+    // Make the fetch call to your new serverless function
+    const response = await fetch('/api/analyze', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -102,10 +96,11 @@ ${dataSample}
 }
 
 /**
- * Answer a user question about the dataset using Gemini.
+ * Answer a user question about the dataset using a serverless function proxy.
  * Returns a final string to display to the user (including all error cases).
  */
-export async function answerQuestionWithAI({ userQuery, fullData, preStats, apiKey }) {
+export async function answerQuestionWithAI({ userQuery, fullData, preStats }) {
+    // We no longer need the apiKey parameter here
     const prompt = `You are a helpful and knowledgeable data analyst.
 You have access to a dataset and precomputed statistics. Your goal is to provide insightful and helpful answers to user questions.
 
@@ -130,15 +125,8 @@ GUIDELINES:
         generationConfig: { temperature: 0, topK: 1, topP: 0 },
     };
 
-    const key = import.meta.env.VITE_GOOGLE_API_KEY;
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${key}`;
-
-    // Keep the same user-facing messages as your original code:
-    if (!key) {
-        return "Sorry, I couldn't process that request. No AI key configured.";
-    }
-
-    const response = await fetch(apiUrl, {
+    // Make the fetch call to your new serverless function
+    const response = await fetch('/api/answer-question', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
