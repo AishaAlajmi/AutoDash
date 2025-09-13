@@ -7,14 +7,14 @@
 // 4) Large-file protection (row sampling), numeric/pie validation, and graceful errors.
 // 5) UI: “Generate with AI” button; when AI is used, we render exactly what it suggests. Otherwise, domain‑aware auto layout (HR / Sales / Finance / Generic) runs as before.
 // -------------------------------------------------------------------------------------------------
-// Setup (Vite recommended):
+// Setup (Vite recommended): 
 //   npm create vite@latest auto-dashboard -- --template react
 //   cd auto-dashboard
 //   npm i xlsx recharts html2canvas framer-motion
 //   npm i -D tailwindcss postcss autoprefixer
 //   npx tailwindcss init -p
 //   → configure tailwind to scan index.html and src/**/*.{js,jsx}
-//   → add Tailwind base/components/utilities to index.css
+//   → add Tailwind base /components/utilities to index.css
 //   → put this file as src/App.jsx (default export)
 //   → create .env with: VITE_GEMINI_API_KEY=xxxx
 // -------------------------------------------------------------------------------------------------
