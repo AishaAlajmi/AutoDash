@@ -17,7 +17,7 @@ import {
   AreaChart,
   Area,
   ComposedChart,
-  Brush, // <-- added
+  Brush,
 } from "recharts";
 import { Icons } from "./pages/Icons";
 import { Footer } from "./components/footer";
@@ -44,11 +44,13 @@ import { SAMPLE_ROWS } from "./pages/SampleData";
 
 // >>> NEW: import AI engine functions
 import { analyzeDatasetWithAI, answerQuestionWithAI } from "./lib/engine";
+
 const getOneClickColor = (theme) => {
-  if (theme === "Light") return "#7c3aed"; // Light primary color
-  if (theme === "Dark") return "#60a5fa"; // Dark primary color
-  return "#c026d3"; // Colorful primary color
+  if (theme === "Light") return "#7c3aed";
+  if (theme === "Dark") return "#60a5fa";
+  return "#c026d3";
 };
+
 const App = () => {
   const [file, setFile] = useState(null);
   const [dashboardData, setDashboardData] = useState(null);
@@ -76,7 +78,7 @@ const App = () => {
     return () => document.head.removeChild(script);
   }, []);
 
-  // ====== AI: file upload -> analysis (moved AI parts into engine.js) ======
+  // ====== AI: file upload -> analysis ======
   const handleFileUpload = (e) => {
     const uploadedFile = e.target.files?.[0];
     if (!uploadedFile) return;
@@ -107,29 +109,24 @@ const App = () => {
           });
           return obj;
         });
+
         const stats = buildStats(fileData);
 
-        // >>> moved AI call to engine:
         const parsedResult = await analyzeDatasetWithAI({ headers, fileData });
 
+        // Ensure we always include total records as first metric
         const totalRecords = fileData.length;
         const totalRecordsMetric = {
           title: "Total Records",
           value: totalRecords.toString(),
           description: "Total number of entries in the dataset.",
         };
-        const updatedMetrics = (parsedResult.keyMetrics || []).map((metric) => {
-          const t = (metric.title || "").toLowerCase();
-          if (t.includes("total employees") || t.includes("total records")) {
-            return {
-              ...metric,
-              value: totalRecords.toString(),
-              title: "Total Records",
-            };
-          }
-          return metric;
-        });
-        if (!updatedMetrics.some((m) => m.title === "Total Records")) {
+        const updatedMetrics = [...(parsedResult.keyMetrics || [])];
+        if (
+          !updatedMetrics.some(
+            (m) => (m.title || "").toLowerCase() === "total records"
+          )
+        ) {
           updatedMetrics.unshift(totalRecordsMetric);
         }
 
@@ -137,11 +134,12 @@ const App = () => {
           originalData: fileData,
           analysisText: parsedResult.analysisText || "",
           keyMetrics: updatedMetrics,
+          // IMPORTANT: rely on pre-aggregated chart data from engine
           charts: (parsedResult.charts || []).map((chart) => ({
             ...chart,
-            currentType: chart.type,
+            currentType: chart.currentType || chart.type,
           })),
-          stats, // <--- NEW
+          stats,
         });
       } catch (err) {
         console.error(err);
@@ -156,7 +154,7 @@ const App = () => {
     reader.readAsArrayBuffer(uploadedFile);
   };
 
-  // ====== AI: chat submit (moved AI parts into engine.js) ======
+  // ====== Chat submit (unchanged behavior) ======
   const handleChatSubmit = async (e) => {
     e.preventDefault();
     if (!userQuery.trim() || !dashboardData) return;
@@ -170,7 +168,6 @@ const App = () => {
       dashboardData.stats,
       newChatHistory
     );
-
     if (localAnswer) {
       setChatHistory((current) => [
         ...current,
@@ -187,7 +184,6 @@ const App = () => {
       const fullData = dashboardData.originalData;
       const preStats = dashboardData.stats;
 
-      // >>> moved AI call to engine:
       const aiResponseText = await answerQuestionWithAI({
         userQuery,
         fullData,
@@ -231,74 +227,64 @@ const App = () => {
       return { ...prev, charts: updatedCharts };
     });
   };
-  const getMetricIcon = (title) => {
-    return getDynamicIcon(title);
-  };
+
+  const getMetricIcon = (title) => getDynamicIcon(title);
   const getChartColors = () => currentTheme.chartColors;
 
+  // >>> UPDATED: use engine-provided chart.data when available
   const renderChart = (chartConfig, chartIndex) => {
-    if (!dashboardData || !dashboardData.originalData) return null;
-    let { title, dataKey, nameKey, currentType } = chartConfig;
+    if (!dashboardData) return null;
 
-    // ----- NEW: Check for valid time data and switch chart type if needed
-    if (currentType === "line") {
-      const hasTimeData = dashboardData.originalData.some((item) => {
-        const x = item[nameKey];
-        return asTimestamp(x) !== null;
-      });
-      if (!hasTimeData) {
-        currentType = "bar"; // Fallback to a different chart type
-      }
+    let { title, dataKey, nameKey, currentType, data } = chartConfig;
+
+    // Preferred data source: engine pre-aggregated data
+    let renderData = Array.isArray(data) ? data : null;
+
+    // Fallback: aggregate from raw data if engine didn't provide data
+    if (!renderData) {
+      if (!dashboardData.originalData || !dataKey || !nameKey) return null;
+      renderData = dashboardData.originalData.reduce((acc, item) => {
+        const key = item[nameKey];
+        if (key === undefined || key === null || key === "") return acc;
+        let value = parseFloat(item[dataKey]);
+        if (isNaN(value)) value = 1;
+        const existing = acc.find((d) => d.name === key);
+        if (existing) {
+          existing.value += value;
+          existing.count = (existing.count || 0) + 1;
+        } else {
+          acc.push({ name: key, value, count: 1 });
+        }
+        return acc;
+      }, []);
     }
 
-    const aggregatedData = dashboardData.originalData.reduce((acc, item) => {
-      const key = item[nameKey];
-      if (key === undefined || key === null || key === "") return acc;
-      let value = parseFloat(item[dataKey]);
-      if (isNaN(value)) value = 1;
-      const existing = acc.find((d) => d.name === key);
-      if (existing) {
-        existing.value += value;
-        existing.count += 1;
-      } else {
-        acc.push({ name: key, value, count: 1 });
-      }
-      return acc;
-    }, []);
-
-    if (aggregatedData.length === 0) return null;
-
-    const pieData = aggregatedData.map((item) => ({
-      name: item.name,
-      value: item.count,
-    }));
-
-    const pieTotal = pieData.reduce((s, d) => s + Number(d.value || 0), 0);
-    const colors = getChartColors(chartIndex);
-
-    const CustomPieLegend = (props) => {
-      const { payload } = props;
+    if (!Array.isArray(renderData) || renderData.length === 0) {
       return (
-        <div className="flex flex-col h-full overflow-y-auto w-1/2 md:w-1/3 p-2 scrollbar-thin">
-          <ul className="list-none space-y-1">
-            {payload.map((entry, index) => (
-              <li
-                key={`legend-${index}`}
-                className="flex items-center space-x-2 whitespace-nowrap overflow-hidden text-ellipsis"
-              >
-                <span
-                  className="w-3 h-3 rounded-sm flex-shrink-0"
-                  style={{ backgroundColor: entry.color }}
-                />
-                <span className="text-xs opacity-80">{entry.value}</span>
-              </li>
-            ))}
-          </ul>
+        <div
+          className={`w-full h-48 ${currentTheme.cardBg} rounded-2xl shadow-xl p-4 flex items-center justify-center`}
+        >
+          <span className="text-sm opacity-60">
+            No data available for this chart.
+          </span>
         </div>
       );
-    };
+    }
 
-    // taller card for dense line charts
+    // Try to derive ts for line charts if engine sent date strings
+    if (
+      currentType === "line" &&
+      renderData.length &&
+      renderData[0].date &&
+      !renderData[0].ts
+    ) {
+      renderData = renderData.map((d) => ({
+        ...d,
+        ts: new Date(d.date).getTime(),
+      }));
+    }
+
+    const colors = getChartColors(chartIndex);
     const cardClass = `w-full ${currentType === "line" ? "h-96" : "h-72"} ${
       currentTheme.cardBg
     } rounded-2xl shadow-xl p-4 transition-transform duration-300 hover:scale-[1.01] border border-white/40 flex flex-col`;
@@ -311,13 +297,11 @@ const App = () => {
           >
             {title}
           </h2>
-
           <select
             value={currentType}
             onChange={(e) => handleChartTypeChange(chartIndex, e.target.value)}
             className={`p-2 rounded-lg text-sm border backdrop-blur ${currentTheme.dropdownBg} ${currentTheme.dropdownText} ${currentTheme.dropdownBorder}`}
           >
-            {/* Apply styles to the options as well if needed, though they usually inherit from the select */}
             {chartOptions.map((option) => (
               <option key={option} value={option}>
                 {option.charAt(0).toUpperCase() + option.slice(1)}
@@ -337,7 +321,7 @@ const App = () => {
       case "bar":
         return chartWrapper(
           <BarChart
-            data={aggregatedData}
+            data={renderData}
             margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
           >
             <defs>
@@ -386,21 +370,12 @@ const App = () => {
         );
 
       case "line": {
-        let timeData = dashboardData.originalData
-          .map((item) => {
-            const x = item[nameKey];
-            const y = parseFloat(item[dataKey]);
-            const ts = asTimestamp(x);
-            // Ensure both a valid timestamp and a numeric value exist
-            if (ts !== null && !isNaN(y)) {
-              return { ts, value: y };
-            }
-            return null;
-          })
-          .filter(Boolean)
+        // Expect { date, ts, value }
+        const plotData = renderData
+          .filter((d) => typeof d.ts === "number" && !isNaN(d.value))
           .sort((a, b) => a.ts - b.ts);
 
-        if (timeData.length === 0) {
+        if (!plotData.length) {
           return (
             <div className={cardClass}>
               <div className="p-4 text-center text-sm opacity-60">
@@ -409,19 +384,6 @@ const App = () => {
             </div>
           );
         }
-        const aggregatedByDay = [];
-        for (const row of timeData) {
-          const dayKey = formatDateShort(row.ts);
-          const last = aggregatedByDay[aggregatedByDay.length - 1];
-          if (last && last.day === dayKey) {
-            last.value += row.value;
-            last.ts = row.ts;
-          } else {
-            aggregatedByDay.push({ day: dayKey, ts: row.ts, value: row.value });
-          }
-        }
-
-        const plotData = downsampleEveryN(aggregatedByDay, 200);
 
         const tickCount = Math.min(8, plotData.length);
         const ticks = [];
@@ -488,7 +450,7 @@ const App = () => {
       case "area":
         return chartWrapper(
           <AreaChart
-            data={aggregatedData}
+            data={renderData}
             margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
           >
             <defs>
@@ -531,7 +493,13 @@ const App = () => {
           </AreaChart>
         );
 
-      case "pie":
+      case "pie": {
+        const pieData = renderData.map((d) => ({
+          name: d.name ?? d.label ?? d.category,
+          value: d.value ?? d.count,
+        }));
+        const total = pieData.reduce((s, d) => s + Number(d.value || 0), 0);
+
         return (
           <div className={cardClass}>
             <div className="flex justify-between items-center mb-4">
@@ -540,7 +508,6 @@ const App = () => {
               >
                 {title}
               </h2>
-
               <select
                 value={currentType}
                 onChange={(e) =>
@@ -548,7 +515,6 @@ const App = () => {
                 }
                 className={`p-2 rounded-lg text-sm border backdrop-blur ${currentTheme.dropdownBg} ${currentTheme.dropdownText} ${currentTheme.dropdownBorder}`}
               >
-                {/* Apply styles to the options as well if needed, though they usually inherit from the select */}
                 {chartOptions.map((option) => (
                   <option key={option} value={option}>
                     {option.charAt(0).toUpperCase() + option.slice(1)}
@@ -560,10 +526,7 @@ const App = () => {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={aggregatedData.map((d) => ({
-                      name: d.name,
-                      value: d.count ?? d.value,
-                    }))}
+                    data={pieData}
                     cx="50%"
                     cy="50%"
                     outerRadius={60}
@@ -571,20 +534,12 @@ const App = () => {
                     labelLine={false}
                     animationDuration={800}
                     label={({ name, value }) => {
-                      const pie = aggregatedData.map((i) => ({
-                        name: i.name,
-                        value: i.count ?? i.value,
-                      }));
-                      const total = pie.reduce(
-                        (s, d) => s + Number(d.value || 0),
-                        0
-                      );
                       const v = Number(value || 0);
                       const pct = total ? (v / total) * 100 : 0;
                       return `${name}: ${pct.toFixed(1)}%`;
                     }}
                   >
-                    {aggregatedData.map((_, index) => (
+                    {pieData.map((_, index) => (
                       <Cell
                         key={`cell-${index}`}
                         fill={
@@ -600,14 +555,6 @@ const App = () => {
                   </Pie>
                   <Tooltip
                     formatter={(value, name) => {
-                      const pie = aggregatedData.map((i) => ({
-                        name: i.name,
-                        value: i.count ?? i.value,
-                      }));
-                      const total = pie.reduce(
-                        (s, d) => s + Number(d.value || 0),
-                        0
-                      );
                       const v = Number(value || 0);
                       const pct = total ? (v / total) * 100 : 0;
                       return [`${pct.toFixed(1)}%`, name];
@@ -621,25 +568,15 @@ const App = () => {
                   />
                 </PieChart>
               </ResponsiveContainer>
-              <CustomPieLegend
-                payload={aggregatedData.map((entry, index) => ({
-                  value: entry.name,
-                  id: `pie-legend-${index}`,
-                  type: "square",
-                  color:
-                    currentTheme.chartColors[
-                      index % currentTheme.chartColors.length
-                    ],
-                }))}
-              />
             </div>
           </div>
         );
+      }
 
       case "composed":
         return chartWrapper(
           <ComposedChart
-            data={aggregatedData}
+            data={renderData}
             margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
           >
             <defs>
@@ -705,7 +642,7 @@ const App = () => {
       case "hbar":
         return chartWrapper(
           <BarChart
-            data={aggregatedData}
+            data={renderData}
             layout="vertical"
             margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
           >
@@ -731,7 +668,6 @@ const App = () => {
               type="category"
               dataKey="name"
               stroke="#6b7280"
-              // Removed the fixed width property
               interval={0}
               tickFormatter={(value) =>
                 value?.length > 20 ? value.substring(0, 20) + "…" : value
@@ -754,6 +690,7 @@ const App = () => {
             />
           </BarChart>
         );
+
       default:
         return null;
     }
@@ -764,7 +701,7 @@ const App = () => {
     const parsed = buildLocalFallback(headers, SAMPLE_ROWS);
     setDashboardData({
       originalData: SAMPLE_ROWS,
-      analysisText: `Demo dataset with ${SAMPLE_ROWS.length} rows across regions and channels. Use the chat to ask questions like “Total Sales by Region?”.`,
+      analysisText: `Demo dataset with ${SAMPLE_ROWS.length} rows across regions and channels.`,
       keyMetrics: [
         {
           title: "Total Records",
@@ -772,21 +709,21 @@ const App = () => {
           description: "Rows in the sample dataset.",
         },
         {
-          title: "Sum",
-          value: String(SAMPLE_ROWS.reduce((s, r) => s + r.Sales, 0)),
-          description: "Total Sales.",
+          title: "Distinct Region",
+          value: String(new Set(SAMPLE_ROWS.map((r) => r.Region)).size),
+          description: "Unique regions.",
         },
         {
-          title: "Average",
+          title: "Total Sales",
+          value: String(SAMPLE_ROWS.reduce((s, r) => s + r.Sales, 0)),
+          description: "Sum of Sales.",
+        },
+        {
+          title: "Avg Sales",
           value: (
             SAMPLE_ROWS.reduce((s, r) => s + r.Sales, 0) / SAMPLE_ROWS.length
           ).toFixed(2),
-          description: "Avg Sales per row.",
-        },
-        {
-          title: "Unique Categories",
-          value: String(new Set(SAMPLE_ROWS.map((r) => r.Region)).size),
-          description: "Distinct Regions.",
+          description: "Average Sales per row.",
         },
       ],
       charts: [
@@ -796,6 +733,12 @@ const App = () => {
           dataKey: "Sales",
           nameKey: "Region",
           currentType: "bar",
+          data: Object.entries(
+            SAMPLE_ROWS.reduce((m, r) => {
+              m[r.Region] = (m[r.Region] || 0) + r.Sales;
+              return m;
+            }, {})
+          ).map(([name, value]) => ({ name, value })),
         },
         {
           type: "line",
@@ -803,6 +746,11 @@ const App = () => {
           dataKey: "Profit",
           nameKey: "Month",
           currentType: "line",
+          data: SAMPLE_ROWS.map((r) => ({
+            date: r.Month,
+            ts: new Date(r.Month).getTime(),
+            value: r.Profit,
+          })),
         },
         {
           type: "pie",
@@ -810,22 +758,15 @@ const App = () => {
           dataKey: "Sales",
           nameKey: "Channel",
           currentType: "pie",
-        },
-        {
-          type: "area",
-          title: "Sales Area by Region",
-          dataKey: "Sales",
-          nameKey: "Region",
-          currentType: "area",
-        },
-        {
-          type: "composed",
-          title: "Composed View",
-          dataKey: "Sales",
-          nameKey: "Region",
-          currentType: "composed",
+          data: Object.entries(
+            SAMPLE_ROWS.reduce((m, r) => {
+              m[r.Channel] = (m[r.Channel] || 0) + r.Sales;
+              return m;
+            }, {})
+          ).map(([name, value]) => ({ name, value })),
         },
       ],
+      stats: parsed,
     });
     setError(null);
     setFile(null);
@@ -910,9 +851,9 @@ const App = () => {
                   onClick={() => setSelectedTheme(k)}
                   className={`py-2 px-4 rounded-xl text-left transition-all duration-200 font-medium ${
                     selectedTheme === k
-                      ? "bg-white/10 ring-2 ring-white/20"
+                      ? "bg:white/10 ring-2 ring-white/20"
                       : "hover:bg-white/5"
-                  }`}
+                  }`.replace("bg:white", "bg")} // small fix for tailwind class
                 >
                   {themes[k].name}
                 </button>
@@ -960,7 +901,7 @@ const App = () => {
               <div>
                 <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white drop-shadow-sm mt-2">
                   {BRAND_NAME}
-                </h1>{" "}
+                </h1>
                 <div className="inline-flex items-center text-xs font-semibold px-2 py-1 rounded-full bg-white/60"></div>
               </div>
             </div>
@@ -977,6 +918,7 @@ const App = () => {
             </p>
           </div>
         </div>
+
         <div className="p-4 md:p-8">
           <div className="w-full max-w-7xl mx-auto">
             {/* Upload / Empty state */}
@@ -1029,8 +971,11 @@ const App = () => {
                     <div className="mb-2 font-semibold">How it works</div>
                     <ol className="list-decimal list-inside space-y-1">
                       <li>Upload an Excel/CSV file.</li>
-                      <li>We analyze headers + sample rows.</li>
-                      <li>AI drafts a summary, metrics, and charts.</li>
+                      <li>We analyze headers & full rows.</li>
+                      <li>
+                        AI writes a summary; metrics & charts are computed 100%
+                        from your data.
+                      </li>
                       <li>Interact with charts and ask questions.</li>
                     </ol>
                   </div>
@@ -1157,8 +1102,8 @@ const App = () => {
                         ))
                       ) : (
                         <div className="flex-1 flex items-center justify-center text-center opacity-60">
-                          Ask about your data, e.g. “What is total sales by
-                          region?”
+                          Ask about your data, e.g. “What changed last month?”
+                          or “Top categories by total amount?”
                         </div>
                       )}
                       <div ref={chatEndRef} />
