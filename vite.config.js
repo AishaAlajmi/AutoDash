@@ -1,4 +1,13 @@
-import { defineConfig } from 'vite'; 
-import path from 'path'; 
-export default 
-defineConfig({ root: '.', publicDir: 'public', server: { port: 5173 }, build: { outDir: 'dist' }, resolve: { alias: { '@': path.resolve(__dirname, 'src/renderer') } } });
+
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': 'http://localhost:3000' // Why: your API runs under vercel dev on 3000
+    }
+  }
+});
